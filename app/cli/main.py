@@ -66,6 +66,19 @@ def run(
     raise typer.Exit(code=0)
 
 
+@app.command()
+def gui() -> None:
+    """Launch the PySide6 GUI."""
+    try:
+        from app.presentation.gui_app import launch_gui
+
+        exit_code = launch_gui()
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    raise typer.Exit(code=exit_code)
+
+
 def _load_config_with_overrides(
     *,
     config_path: Path,

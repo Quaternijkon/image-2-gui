@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "api": {
+    "provider": "openai",
+    "api_type": "image",
+    "model": "gpt-image-2",
+    "api_key_source": "env"
+  },
+  "input": {
+    "mode": "generate",
+    "recursive": false
+  },
+  "prompt": {
+    "template": "Create a clean product image for item {index}.",
+    "variables_enabled": true
+  },
+  "image": {
+    "size": "1024x1024",
+    "quality": "auto",
+    "output_format": "png",
+    "background": "auto",
+    "moderation": "auto",
+    "n": 1,
+    "partial_images": 0,
+    "save_partials": false
+  },
+  "execution": {
+    "concurrency": 2,
+    "max_retries": 2,
+    "timeout_seconds": 240,
+    "failure_policy": "continue",
+    "overwrite_policy": "skip_existing"
+  },
+  "output": {
+    "job_subdir_enabled": true,
+    "filename_template": "{stem}_gpt_{variant}.{ext}",
+    "save_manifest": true,
+    "save_logs": true,
+    "save_config_snapshot": true
+  }
+}

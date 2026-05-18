@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.command_builder import CommandBuilder
 from app.core.config import AppConfig
 
@@ -44,6 +46,30 @@ def test_powershell_command_never_includes_api_key_material():
     assert "sk-secret-should-not-appear" not in command
     assert "OPENAI_API_KEY" in command
     assert "--api-key" not in command
+
+
+def test_powershell_command_uses_config_output_dir_when_not_explicit():
+    config = AppConfig(
+        prompt={"template": "Create a clean product image"},
+        output={"output_dir": "D:/Configured Output"},
+    )
+
+    command = CommandBuilder(config).build_powershell_command(
+        config_path="D:/job.config.json",
+        input_dir=None,
+    )
+
+    assert '--output-dir "D:/Configured Output"' in command
+
+
+def test_powershell_command_fails_when_output_dir_cannot_be_resolved():
+    config = AppConfig(prompt={"template": "Create a clean product image"})
+
+    with pytest.raises(ValueError, match="output_dir is required"):
+        CommandBuilder(config).build_powershell_command(
+            config_path="D:/job.config.json",
+            input_dir=None,
+        )
 
 
 def test_powershell_quote_escapes_embedded_double_quotes_and_dollars():

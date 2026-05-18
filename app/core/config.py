@@ -17,9 +17,26 @@ class ApiConfig(StrictModel):
     api_key_source: str = "env"
     api_key: Optional[str] = Field(default=None, exclude=True, repr=False)
 
+    @field_validator("api_key_source")
+    @classmethod
+    def api_key_source_must_be_safe_reference(cls, value: str) -> str:
+        if value.startswith("sk-"):
+            raise ValueError("api_key_source must reference a safe key source, not secret material")
+
+        allowed_exact = {"env", "keyring", "windows_credential_manager", "none"}
+        if value in allowed_exact:
+            return value
+
+        if value.startswith("env:") and len(value) > 4:
+            env_name = value[4:]
+            if env_name.replace("_", "").isalnum() and not env_name[0].isdigit():
+                return value
+
+        raise ValueError("api_key_source must reference a safe key source")
+
 
 class InputConfig(StrictModel):
-    mode: Literal["generate", "edit"] = "edit"
+    mode: Literal["generate", "edit", "inpaint", "mask"] = "edit"
     input_dir: Optional[Path] = None
     recursive: bool = False
     extensions: list[str] = Field(default_factory=lambda: [".png", ".jpg", ".jpeg", ".webp"])
@@ -41,13 +58,13 @@ class PromptConfig(StrictModel):
 
 
 class ImageConfig(StrictModel):
-    size: str = "1024x1024"
-    quality: str = "medium"
+    size: str = "auto"
+    quality: str = "auto"
     output_format: str = "png"
     output_compression: Optional[int] = None
     background: str = "auto"
     moderation: Literal["auto", "low"] = "auto"
-    n: int = Field(default=1, ge=1)
+    n: int = Field(default=1, ge=1, le=10)
     stream: bool = False
     partial_images: int = 0
     save_partials: bool = False
@@ -132,9 +149,9 @@ class ImageConfig(StrictModel):
 
 
 class ExecutionConfig(StrictModel):
-    concurrency: int = Field(default=2, ge=1)
-    max_retries: int = Field(default=2, ge=0)
-    timeout_seconds: int = Field(default=240, ge=1)
+    concurrency: int = Field(default=2, ge=1, le=8)
+    max_retries: int = Field(default=2, ge=0, le=5)
+    timeout_seconds: int = Field(default=240, ge=30, le=600)
     failure_policy: Literal["continue", "stop"] = "continue"
     overwrite_policy: Literal["skip_existing", "overwrite", "append_counter", "new_job_dir"] = (
         "skip_existing"
@@ -144,7 +161,7 @@ class ExecutionConfig(StrictModel):
 class OutputConfig(StrictModel):
     output_dir: Optional[Path] = None
     job_subdir_enabled: bool = True
-    filename_template: str = "{stem}_gpt_{variant}"
+    filename_template: str = "{stem}_gpt_{variant}.{ext}"
     save_manifest: bool = True
     save_logs: bool = True
     save_config_snapshot: bool = True

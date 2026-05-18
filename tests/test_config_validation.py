@@ -11,8 +11,8 @@ def test_default_config_matches_task_defaults():
 
     assert config.api.model == "gpt-image-2"
     assert config.api.api_type == "image"
-    assert config.image.size == "1024x1024"
-    assert config.image.quality == "medium"
+    assert config.image.size == "auto"
+    assert config.image.quality == "auto"
     assert config.image.output_format == "png"
     assert config.image.background == "auto"
     assert config.image.moderation == "auto"
@@ -25,6 +25,34 @@ def test_default_config_matches_task_defaults():
     assert config.execution.timeout_seconds == 240
     assert config.execution.failure_policy == "continue"
     assert config.execution.overwrite_policy == "skip_existing"
+
+
+def test_task_one_review_config_bounds_and_modes_are_enforced():
+    AppConfig(prompt={"template": "Generate"}, input={"mode": "inpaint"})
+
+    for value in [0, 11]:
+        with pytest.raises(ValidationError, match="less than or equal to 10|greater than or equal to 1"):
+            AppConfig(prompt={"template": "Generate"}, image={"n": value})
+
+    for value in [0, 9]:
+        with pytest.raises(ValidationError, match="less than or equal to 8|greater than or equal to 1"):
+            AppConfig(prompt={"template": "Generate"}, execution={"concurrency": value})
+
+    for value in [-1, 6]:
+        with pytest.raises(ValidationError, match="less than or equal to 5|greater than or equal to 0"):
+            AppConfig(prompt={"template": "Generate"}, execution={"max_retries": value})
+
+    for value in [29, 601]:
+        with pytest.raises(ValidationError, match="less than or equal to 600|greater than or equal to 30"):
+            AppConfig(prompt={"template": "Generate"}, execution={"timeout_seconds": value})
+
+
+def test_api_key_source_rejects_pasted_secret_material():
+    with pytest.raises(ValidationError, match="api_key_source must reference"):
+        AppConfig(
+            prompt={"template": "Generate"},
+            api={"api_key_source": "sk-secret-should-not-be-here"},
+        )
 
 
 @pytest.mark.parametrize(

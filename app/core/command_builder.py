@@ -20,6 +20,12 @@ class CommandBuilder:
         concurrency: Optional[int] = None,
         events_jsonl: bool = True,
     ) -> str:
+        resolved_output_dir = output_dir
+        if resolved_output_dir is None and self.config is not None:
+            resolved_output_dir = self.config.output.output_dir
+        if resolved_output_dir is None:
+            raise ValueError("output_dir is required to build a runnable command")
+
         lines = [
             "# Configure OPENAI_API_KEY in your environment before running this command.",
             "python -m app run `",
@@ -29,8 +35,7 @@ class CommandBuilder:
         if input_dir is not None:
             lines.append(f"  --input-dir {self._quote_powershell(input_dir)} `")
 
-        if output_dir is not None:
-            lines.append(f"  --output-dir {self._quote_powershell(output_dir)} `")
+        lines.append(f"  --output-dir {self._quote_powershell(resolved_output_dir)} `")
 
         resolved_concurrency = concurrency
         if resolved_concurrency is None and self.config is not None:

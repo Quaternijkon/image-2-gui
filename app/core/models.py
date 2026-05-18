@@ -57,8 +57,9 @@ class JobLayout(CoreModel):
     final_dir: Path
     partials_dir: Path
     logs_dir: Path
-    events_dir: Path
-    errors_dir: Path
+    app_log_path: Path
+    events_jsonl_path: Path
+    errors_jsonl_path: Path
     failed_dir: Path
     thumbnails_dir: Path
     manifest_path: Path
@@ -67,10 +68,17 @@ class JobLayout(CoreModel):
     command_path: Path
 
 
+class PlannedJob(CoreModel):
+    job: JobLayout
+    tasks: list[TaskPlan] = Field(default_factory=list)
+    issues: list[PreflightIssue] = Field(default_factory=list)
+
+
 __all__ = [
     "InputImage",
     "JobLayout",
     "OutputPlan",
+    "PlannedJob",
     "PreflightIssue",
     "ScanResult",
     "TaskPlan",

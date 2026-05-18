@@ -17,6 +17,8 @@ class PromptRenderer:
             return template.format_map(_StrictFormatMap(self.context))
         except KeyError as exc:
             raise PromptRenderError(f"unknown prompt variable: {exc.args[0]}") from exc
+        except ValueError as exc:
+            raise PromptRenderError(f"malformed prompt template: {exc}") from exc
 
 
 class _StrictFormatMap(dict[str, object]):

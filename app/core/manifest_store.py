@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,22 +11,47 @@ TERMINAL_SUCCESS_STATUSES = {"succeeded", "skipped"}
 class ManifestStore:
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._load_issues: list[dict[str, Any]] = []
 
     def append(self, record: dict[str, Any]) -> None:
+        if "task_id" in record and "status" not in record:
+            raise ValueError("task records require task_id and status")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         sanitized = sanitize_record(record)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(sanitized, sort_keys=True, default=str) + "\n")
 
+    def append_task_record(self, record: dict[str, Any]) -> None:
+        if not record.get("task_id") or not record.get("status"):
+            raise ValueError("task records require task_id and status")
+        self.append(record)
+
     def load_records(self) -> list[dict[str, Any]]:
+        self._load_issues = []
         if not self.path.exists():
             return []
         records: list[dict[str, Any]] = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
+        for line_number, line in enumerate(self.path.read_text(encoding="utf-8").splitlines(), start=1):
             if not line.strip():
                 continue
-            records.append(json.loads(line))
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                self._load_issues.append(
+                    {
+                        "line_number": line_number,
+                        "message": str(exc),
+                        "line": line,
+                    }
+                )
+                continue
+            records.append(record)
         return records
+
+    def load_issues(self) -> list[dict[str, Any]]:
+        if not self._load_issues:
+            self.load_records()
+        return list(self._load_issues)
 
     def load_latest_by_task(self) -> dict[str, dict[str, Any]]:
         latest: dict[str, dict[str, Any]] = {}
@@ -78,7 +104,13 @@ def sanitize_record(value: Any) -> Any:
         }
     if isinstance(value, list):
         return [sanitize_record(item) for item in value]
+    if isinstance(value, str):
+        return _redact_secret_strings(value)
     return value
+
+
+def _redact_secret_strings(value: str) -> str:
+    return re.sub(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]+", "[REDACTED]", value)
 
 
 __all__ = ["ManifestStore", "sanitize_record"]

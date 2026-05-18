@@ -14,6 +14,15 @@ ALLOWED_EVENTS = {
     "job_completed",
 }
 
+REQUIRED_FIELDS = {
+    "job_started": {"job_id", "total_tasks"},
+    "task_started": {"job_id", "task_id"},
+    "partial_saved": {"job_id", "task_id", "partial_file"},
+    "task_succeeded": {"job_id", "task_id", "output_files"},
+    "task_failed": {"job_id", "task_id", "error"},
+    "job_completed": {"job_id", "summary"},
+}
+
 
 class EventProtocolError(ValueError):
     pass
@@ -26,12 +35,12 @@ class EventProtocol:
         *,
         job_id: str | None = None,
         task_id: str | None = None,
-        payload: dict[str, Any] | None = None,
         timestamp: datetime | None = None,
+        **fields: Any,
     ) -> str:
         _validate_event_name(event)
         emitted_at = timestamp or datetime.now(timezone.utc)
-        record = {
+        record: dict[str, Any] = {
             "timestamp": emitted_at.isoformat().replace("+00:00", "Z"),
             "event": event,
         }
@@ -39,8 +48,8 @@ class EventProtocol:
             record["job_id"] = job_id
         if task_id is not None:
             record["task_id"] = task_id
-        if payload is not None:
-            record["payload"] = sanitize_record(payload)
+        record.update(fields)
+        _validate_required_fields(event, record)
         return json.dumps(sanitize_record(record), sort_keys=True, default=str) + "\n"
 
     @staticmethod
@@ -57,12 +66,19 @@ class EventProtocol:
         _validate_event_name(str(record["event"]))
         if "timestamp" not in record:
             raise EventProtocolError("missing timestamp field")
-        return record
+        _validate_required_fields(str(record["event"]), record)
+        return sanitize_record(record)
 
 
 def _validate_event_name(event: str) -> None:
     if event not in ALLOWED_EVENTS:
         raise EventProtocolError(f"unknown event: {event}")
+
+
+def _validate_required_fields(event: str, record: dict[str, Any]) -> None:
+    for field in sorted(REQUIRED_FIELDS[event]):
+        if field not in record:
+            raise EventProtocolError(f"missing required field: {field}")
 
 
 __all__ = ["EventProtocol", "EventProtocolError"]

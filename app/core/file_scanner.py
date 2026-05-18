@@ -6,6 +6,8 @@ from app.core.config import InputConfig
 from app.core.image_validator import read_image_metadata, validate_mask
 from app.core.models import InputImage, PreflightIssue, ScanResult
 
+FILE_ATTRIBUTE_HIDDEN = 0x2
+
 
 def scan_input_images(config: InputConfig) -> ScanResult:
     if config.input_dir is None or not config.input_dir.exists():
@@ -63,10 +65,18 @@ def _iter_candidates(input_dir: Path, *, recursive: bool) -> list[Path]:
         (
             path
             for path in iterator
-            if path.is_file() and not path.name.startswith(".") and not path.name.startswith("~$")
+            if path.is_file()
+            and not path.name.startswith(".")
+            and not path.name.startswith("~$")
+            and not _has_hidden_attribute(path)
         ),
         key=lambda path: path.as_posix().lower(),
     )
+
+
+def _has_hidden_attribute(path: Path) -> bool:
+    attributes = getattr(path.stat(), "st_file_attributes", 0)
+    return bool(attributes & FILE_ATTRIBUTE_HIDDEN)
 
 
 def _attach_mask(image: InputImage, mask_dir: Path) -> tuple[InputImage, list[PreflightIssue]]:
@@ -129,4 +139,4 @@ def _find_mask(source_path: Path, mask_dir: Path) -> Path | PreflightIssue | Non
     return None
 
 
-__all__ = ["scan_input_images"]
+__all__ = ["FILE_ATTRIBUTE_HIDDEN", "scan_input_images"]

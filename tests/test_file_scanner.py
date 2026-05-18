@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from app.core.config import InputConfig
-from app.core.file_scanner import scan_input_images
+from app.core.file_scanner import FILE_ATTRIBUTE_HIDDEN, scan_input_images
 
 
 def test_scan_input_images_filters_extensions_and_skips_hidden_temp_files(tmp_path, make_image):
@@ -24,6 +24,32 @@ def test_scan_input_images_filters_extensions_and_skips_hidden_temp_files(tmp_pa
     assert result.images[0].height == 24
     assert result.images[0].format == "PNG"
     assert result.issues == []
+
+
+def test_scan_input_images_skips_windows_hidden_attribute(tmp_path, make_image, monkeypatch):
+    visible = make_image(tmp_path / "visible.png")
+    hidden = make_image(tmp_path / "hidden.png")
+    original_stat = Path.stat
+
+    def fake_stat(path, *args, **kwargs):
+        stat_result = original_stat(path, *args, **kwargs)
+        if path == hidden:
+            class HiddenStat:
+                def __init__(self, wrapped):
+                    self._wrapped = wrapped
+                    self.st_file_attributes = FILE_ATTRIBUTE_HIDDEN
+
+                def __getattr__(self, name):
+                    return getattr(self._wrapped, name)
+
+            return HiddenStat(stat_result)
+        return stat_result
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+
+    result = scan_input_images(InputConfig(input_dir=tmp_path))
+
+    assert [image.path for image in result.images] == [visible]
 
 
 def test_scan_input_images_recurses_and_reports_invalid_images(tmp_path, make_image):

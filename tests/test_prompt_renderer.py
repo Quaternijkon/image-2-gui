@@ -34,3 +34,10 @@ def test_prompt_renderer_returns_template_unchanged_when_variables_disabled():
     renderer = PromptRenderer(variables_enabled=False, context={"stem": "product_001"})
 
     assert renderer.render("Create {stem} {missing}") == "Create {stem} {missing}"
+
+
+def test_prompt_renderer_wraps_malformed_format_strings():
+    renderer = PromptRenderer(variables_enabled=True, context={"stem": "product_001"})
+
+    with pytest.raises(PromptRenderError, match="malformed prompt template"):
+        renderer.render("Create {stem")

@@ -83,3 +83,4 @@ def test_cli_non_dry_run_uses_mock_api_env_without_network(tmp_path, monkeypatch
     assert json.loads((output_dir / "summary.json").read_text())["succeeded"] == 1
     assert list((output_dir / "final").glob("*.png"))
     assert "sk-" not in result.stdout
+    assert "" not in result.stdout.splitlines()

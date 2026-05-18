@@ -89,6 +89,7 @@ class OpenAIImageClient:
             "background": image_config.background,
             "moderation": image_config.moderation,
             "n": 1,
+            "timeout": self.config.execution.timeout_seconds,
         }
         if image_config.output_compression is not None and image_config.output_format != "png":
             params["output_compression"] = image_config.output_compression

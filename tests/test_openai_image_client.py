@@ -70,7 +70,11 @@ def _task(tmp_path: Path, *, mode="generate", image_path=None, mask_path=None):
 
 def test_openai_image_client_generates_non_stream_result_without_input_fidelity(tmp_path):
     sdk = _SdkClient()
-    config = AppConfig(prompt={"template": "prompt"}, image={"output_format": "png"})
+    config = AppConfig(
+        prompt={"template": "prompt"},
+        image={"output_format": "png"},
+        execution={"timeout_seconds": 123},
+    )
 
     result = asyncio.run(OpenAIImageClient(config, sdk_client=sdk).run_task(_task(tmp_path)))
 
@@ -79,6 +83,7 @@ def test_openai_image_client_generates_non_stream_result_without_input_fidelity(
     assert params["model"] == "gpt-image-2"
     assert params["prompt"] == "prompt"
     assert params["output_format"] == "png"
+    assert params["timeout"] == 123
     assert "input_fidelity" not in params
     assert "output_compression" not in params
 
@@ -100,6 +105,7 @@ def test_openai_image_client_edits_with_image_and_mask_files_then_closes_them(tm
     _, params = sdk.images.calls[0]
     assert params["image"][0].closed
     assert params["mask"].closed
+    assert params["timeout"] == 240
     assert "input_fidelity" not in params
 
 

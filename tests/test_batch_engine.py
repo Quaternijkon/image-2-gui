@@ -7,7 +7,7 @@ from app.core.batch_engine import BatchEngine
 from app.core.config import AppConfig
 from app.core.errors import ImageBatchError
 from app.core.manifest_store import ManifestStore
-from app.core.models import JobLayout, OutputPlan, PlannedJob, TaskPlan
+from app.core.models import InputImage, JobLayout, OutputPlan, PlannedJob, PreflightIssue, TaskPlan
 from app.core.openai_image_client import CompletedImage, PartialImage
 
 
@@ -122,8 +122,33 @@ def test_batch_engine_saves_streaming_partials_but_only_completed_succeeds(tmp_p
     assert [json.loads(line)["event"] for line in events].count("partial_saved") == 2
 
 
+def test_batch_engine_does_not_save_partials_when_disabled(tmp_path):
+    task = _task(tmp_path, "task-1")
+    client = SequencedClient(
+        [[PartialImage(index=0, b64_json=PNG_B64), CompletedImage(b64_json=PNG_B64)]]
+    )
+    events = []
+
+    summary = asyncio.run(
+        BatchEngine(
+            AppConfig(
+                prompt={"template": "prompt"},
+                image={"stream": True, "partial_images": 1, "save_partials": False},
+            ),
+            _job(tmp_path, [task]),
+            client,
+            event_sink=events.append,
+        ).run()
+    )
+
+    assert summary["succeeded"] == 1
+    assert not (tmp_path / "job" / "partials" / "task-1" / "partial_0.png").exists()
+    assert "partial_saved" not in [json.loads(line)["event"] for line in events]
+
+
 def test_batch_engine_retries_rate_limit_and_succeeds(tmp_path):
     task = _task(tmp_path, "task-1")
+    events = []
     client = SequencedClient(
         [
             ImageBatchError("rate_limit", "slow down", retryable=True),
@@ -136,12 +161,27 @@ def test_batch_engine_retries_rate_limit_and_succeeds(tmp_path):
             AppConfig(prompt={"template": "prompt"}, execution={"max_retries": 1}),
             _job(tmp_path, [task]),
             client,
+            event_sink=events.append,
             retry_backoff_seconds=0,
         ).run()
     )
 
     assert summary["succeeded"] == 1
     assert client.calls == ["task-1", "task-1"]
+    records = ManifestStore(tmp_path / "job" / "manifest.jsonl").load_records()
+    retry_records = [record for record in records if record.get("error_code") == "rate_limit"]
+    assert retry_records == [
+        {
+            "attempt": 1,
+            "error_code": "rate_limit",
+            "message": "retry scheduled: slow down",
+            "status": "failed",
+            "task_id": "task-1",
+        }
+    ]
+    failed_events = [json.loads(line) for line in events if json.loads(line)["event"] == "task_failed"]
+    assert failed_events[0]["attempt"] == 1
+    assert failed_events[0]["message"] == "retry scheduled: slow down"
 
 
 def test_batch_engine_does_not_retry_content_policy_failure(tmp_path):
@@ -189,16 +229,107 @@ def test_batch_engine_records_write_failure_as_failed_task(tmp_path):
     assert latest["task-1"]["error_code"] == "write_error"
 
 
-def test_batch_engine_records_validation_failed_without_api_call(tmp_path):
-    task = _task(tmp_path, "task-1", status="validation_failed")
-    client = SequencedClient([])
+def test_batch_engine_rejects_output_paths_outside_job_root(tmp_path):
+    task = _task(tmp_path, "task-1")
+    task.output_plan.final_path = tmp_path / "outside.png"
+    client = SequencedClient([[CompletedImage(b64_json=PNG_B64)]])
 
     summary = asyncio.run(
         BatchEngine(AppConfig(prompt={"template": "prompt"}), _job(tmp_path, [task]), client).run()
     )
 
     assert summary["failed"] == 1
+    latest = ManifestStore(tmp_path / "job" / "manifest.jsonl").load_latest_by_task()
+    assert latest["task-1"]["error_code"] == "write_error"
+
+
+def test_batch_engine_records_validation_failed_without_api_call(tmp_path):
+    task = _task(tmp_path, "task-1", status="validation_failed")
+    task.input_image = InputImage(
+        path=tmp_path / "input.png",
+        width=32,
+        height=32,
+        format="png",
+        validation_status="validation_failed",
+        issues=[PreflightIssue(code="bad_mask", message="mask dimensions differ")],
+    )
+    client = SequencedClient([])
+    events = []
+
+    summary = asyncio.run(
+        BatchEngine(
+            AppConfig(prompt={"template": "prompt"}),
+            _job(tmp_path, [task]),
+            client,
+            event_sink=events.append,
+        ).run()
+    )
+
+    assert summary["failed"] == 1
     assert client.calls == []
+    latest = ManifestStore(tmp_path / "job" / "manifest.jsonl").load_latest_by_task()
+    assert latest["task-1"]["issues"][0]["code"] == "bad_mask"
+    failed_event = [json.loads(line) for line in events if json.loads(line)["event"] == "task_failed"][0]
+    assert failed_event["issues"][0]["message"] == "mask dimensions differ"
+
+
+def test_batch_engine_pause_control_marks_remaining_tasks_paused(tmp_path):
+    tasks = [_task(tmp_path, "task-1"), _task(tmp_path, "task-2")]
+    planned = _job(tmp_path, tasks)
+    planned.job.root.mkdir(parents=True)
+    (planned.job.root / "job.control.json").write_text('{"pause_requested": true}', encoding="utf-8")
+    client = SequencedClient([])
+
+    summary = asyncio.run(
+        BatchEngine(AppConfig(prompt={"template": "prompt"}), planned, client).run()
+    )
+
+    assert summary["paused"] == 2
+    assert client.calls == []
+    latest = ManifestStore(planned.job.manifest_path).load_latest_by_task()
+    assert latest["task-1"]["status"] == "paused"
+    assert latest["task-2"]["status"] == "paused"
+
+
+def test_batch_engine_cancel_control_marks_remaining_tasks_canceled(tmp_path):
+    tasks = [_task(tmp_path, "task-1"), _task(tmp_path, "task-2")]
+    planned = _job(tmp_path, tasks)
+    planned.job.root.mkdir(parents=True)
+    (planned.job.root / "job.control.json").write_text('{"cancel_requested": true}', encoding="utf-8")
+    client = SequencedClient([])
+
+    summary = asyncio.run(
+        BatchEngine(AppConfig(prompt={"template": "prompt"}), planned, client).run()
+    )
+
+    assert summary["canceled"] == 2
+    assert client.calls == []
+    latest = ManifestStore(planned.job.manifest_path).load_latest_by_task()
+    assert latest["task-1"]["status"] == "canceled"
+    assert latest["task-2"]["status"] == "canceled"
+
+
+def test_batch_engine_failure_policy_stop_marks_later_tasks_stopped(tmp_path):
+    tasks = [_task(tmp_path, "task-1"), _task(tmp_path, "task-2")]
+    client = SequencedClient([ImageBatchError("content_policy", "blocked", retryable=False)])
+
+    summary = asyncio.run(
+        BatchEngine(
+            AppConfig(
+                prompt={"template": "prompt"},
+                execution={"concurrency": 1, "failure_policy": "stop"},
+            ),
+            _job(tmp_path, tasks),
+            client,
+            retry_backoff_seconds=0,
+        ).run()
+    )
+
+    assert summary["failed"] == 1
+    assert summary["stopped"] == 1
+    assert client.calls == ["task-1"]
+    latest = ManifestStore(tmp_path / "job" / "manifest.jsonl").load_latest_by_task()
+    assert latest["task-2"]["status"] == "stopped"
 
 
 def test_batch_engine_resume_skips_succeeded_and_retries_failed(tmp_path):

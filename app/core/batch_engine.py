@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from app.core.config import AppConfig
 from app.core.errors import ImageBatchError, classify_exception
@@ -29,16 +29,27 @@ class BatchEngine:
         manifest_store: ManifestStore | None = None,
         resume: bool = False,
         retry_backoff_seconds: float = 0.25,
+        control_path: Path | None = None,
     ) -> None:
         self.config = config
         self.planned_job = planned_job
         self.client = client
         self.event_sink = event_sink
-        self.writer = writer or OutputWriter()
+        self.writer = writer or OutputWriter(output_root=planned_job.job.root)
         self.manifest = manifest_store or ManifestStore(planned_job.job.manifest_path)
         self.resume = resume
         self.retry_backoff_seconds = retry_backoff_seconds
-        self.summary = {"total": len(planned_job.tasks), "succeeded": 0, "failed": 0, "skipped": 0}
+        self.control_path = control_path or planned_job.job.root / "job.control.json"
+        self._stop_requested = False
+        self.summary = {
+            "total": len(planned_job.tasks),
+            "succeeded": 0,
+            "failed": 0,
+            "skipped": 0,
+            "paused": 0,
+            "canceled": 0,
+            "stopped": 0,
+        }
 
     async def run(self) -> dict[str, int]:
         self._ensure_layout()
@@ -73,8 +84,23 @@ class BatchEngine:
             await self._run_task(task)
 
     async def _run_task(self, task: TaskPlan) -> None:
+        control_state = self._read_control_state()
+        if control_state.get("cancel_requested") is True:
+            self._record_terminal_state(task, "canceled")
+            return
+        if control_state.get("pause_requested") is True:
+            self._record_terminal_state(task, "paused")
+            return
+        if self._stop_requested:
+            self._record_terminal_state(task, "stopped")
+            return
         if task.status == "validation_failed":
-            self._record_failed(task, ImageBatchError("validation_failed", "task failed preflight validation"), 0)
+            self._record_failed(
+                task,
+                ImageBatchError("validation_failed", "task failed preflight validation"),
+                0,
+                issues=_task_issue_details(task),
+            )
             return
         if task.output_plan and task.output_plan.should_skip:
             self.summary["skipped"] += 1
@@ -94,18 +120,19 @@ class BatchEngine:
                 completed_seen = False
                 for result in results:
                     if isinstance(result, PartialImage):
-                        partial_path = self.writer.write_partial(
-                            task,
-                            result.b64_json,
-                            partial_index=result.index,
-                            output_format=self.config.image.output_format,
-                        )
-                        self._emit(
-                            "partial_saved",
-                            task_id=task.task_id,
-                            partial_index=result.index,
-                            path=str(partial_path),
-                        )
+                        if self.config.image.save_partials:
+                            partial_path = self.writer.write_partial(
+                                task,
+                                result.b64_json,
+                                partial_index=result.index,
+                                output_format=self.config.image.output_format,
+                            )
+                            self._emit(
+                                "partial_saved",
+                                task_id=task.task_id,
+                                partial_index=result.index,
+                                path=str(partial_path),
+                            )
                     elif isinstance(result, CompletedImage):
                         final_path = self.writer.write_final(task, result.b64_json)
                         output_files.append(str(final_path))
@@ -133,23 +160,65 @@ class BatchEngine:
             except Exception as exc:
                 error = classify_exception(exc)
                 if error.retryable and attempt < max_attempts:
+                    self._record_retry_scheduled(task, error, attempt)
                     await asyncio.sleep(self.retry_backoff_seconds * attempt)
                     continue
                 self._record_failed(task, error, attempt)
                 return
 
-    def _record_failed(self, task: TaskPlan, error: ImageBatchError, attempt: int) -> None:
-        self.summary["failed"] += 1
+    def _record_retry_scheduled(self, task: TaskPlan, error: ImageBatchError, attempt: int) -> None:
+        retry_message = f"retry scheduled: {error.message}"
         self.manifest.append_task_record(
             {
                 "task_id": task.task_id,
                 "status": "failed",
                 "attempt": attempt,
                 "error_code": error.code,
-                "message": error.message,
+                "message": retry_message,
             }
         )
-        self._emit("task_failed", task_id=task.task_id, error_code=error.code, message=error.message, attempt=attempt)
+        self._emit(
+            "task_failed",
+            task_id=task.task_id,
+            error_code=error.code,
+            message=retry_message,
+            attempt=attempt,
+        )
+
+    def _record_failed(
+        self,
+        task: TaskPlan,
+        error: ImageBatchError,
+        attempt: int,
+        *,
+        issues: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.summary["failed"] += 1
+        if self.config.execution.failure_policy == "stop":
+            self._stop_requested = True
+        record = {
+            "task_id": task.task_id,
+            "status": "failed",
+            "attempt": attempt,
+            "error_code": error.code,
+            "message": error.message,
+        }
+        if issues:
+            record["issues"] = issues
+        self.manifest.append_task_record(record)
+        event_fields: dict[str, Any] = {
+            "task_id": task.task_id,
+            "error_code": error.code,
+            "message": error.message,
+            "attempt": attempt,
+        }
+        if issues:
+            event_fields["issues"] = issues
+        self._emit("task_failed", **event_fields)
+
+    def _record_terminal_state(self, task: TaskPlan, status: str) -> None:
+        self.summary[status] += 1
+        self.manifest.append_task_record({"task_id": task.task_id, "status": status})
 
     def _emit(self, event: str, **fields: object) -> None:
         line = EventProtocol.serialize(event, **fields)
@@ -159,6 +228,17 @@ class BatchEngine:
             self.planned_job.job.events_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
             with self.planned_job.job.events_jsonl_path.open("a", encoding="utf-8") as handle:
                 handle.write(line)
+
+    def _read_control_state(self) -> dict[str, Any]:
+        if not self.control_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.control_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return payload
 
     def _write_summary(self) -> None:
         _write_json(self.planned_job.job.summary_path, self.summary)
@@ -178,6 +258,24 @@ class BatchEngine:
 def _write_json(path: Path, value: dict[str, int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(sanitize_record(value), sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+
+def _task_issue_details(task: TaskPlan) -> list[dict[str, Any]]:
+    issues = getattr(getattr(task, "input_image", None), "issues", None) or []
+    details: list[dict[str, Any]] = []
+    for issue in issues:
+        if hasattr(issue, "model_dump"):
+            details.append(issue.model_dump(mode="json"))
+        elif isinstance(issue, dict):
+            details.append(issue)
+        else:
+            details.append(
+                {
+                    "code": getattr(issue, "code", "validation_failed"),
+                    "message": getattr(issue, "message", str(issue)),
+                }
+            )
+    return details
 
 
 __all__ = ["BatchEngine"]

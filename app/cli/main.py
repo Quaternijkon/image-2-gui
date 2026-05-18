@@ -59,7 +59,7 @@ def run(
         if os.environ.get("GPT_IMAGE_BATCH_MOCK_API") == "1"
         else OpenAIImageClient(app_config)
     )
-    event_sink = typer.echo if events_jsonl else None
+    event_sink = (lambda line: typer.echo(line.rstrip("\n"))) if events_jsonl else None
     summary = asyncio.run(BatchEngine(app_config, planned, client, event_sink=event_sink).run())
     if not events_jsonl:
         _echo({"summary": summary, "output_dir": str(planned.job.root)}, jsonl=False)

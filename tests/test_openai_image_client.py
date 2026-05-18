@@ -1,5 +1,9 @@
 import asyncio
+import sys
+from types import SimpleNamespace
 from pathlib import Path
+
+import pytest
 
 from app.core.config import AppConfig
 from app.core.models import OutputPlan, TaskPlan
@@ -125,3 +129,61 @@ def test_openai_image_client_streams_partial_and_completed_events(tmp_path):
     _, params = sdk.images.calls[0]
     assert params["stream"] is True
     assert params["partial_images"] == 1
+
+
+def test_openai_image_client_resolves_custom_env_api_key(monkeypatch):
+    created = {}
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            created.update(kwargs)
+            self.images = _Images()
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(AsyncOpenAI=_FakeAsyncOpenAI))
+    monkeypatch.setenv("ALT_OPENAI_API_KEY", "test-key-from-alt-env")
+    config = AppConfig(
+        api={"api_key_source": "env:ALT_OPENAI_API_KEY"},
+        prompt={"template": "prompt"},
+    )
+
+    OpenAIImageClient(config).sdk_client
+
+    assert created["api_key"] == "test-key-from-alt-env"
+
+
+def test_openai_image_client_errors_when_configured_env_key_is_missing(monkeypatch):
+    monkeypatch.delenv("MISSING_OPENAI_API_KEY", raising=False)
+    config = AppConfig(
+        api={"api_key_source": "env:MISSING_OPENAI_API_KEY"},
+        prompt={"template": "prompt"},
+    )
+
+    with pytest.raises(RuntimeError, match="MISSING_OPENAI_API_KEY"):
+        OpenAIImageClient(config).sdk_client
+
+
+def test_openai_image_client_resolves_keyring_api_key(monkeypatch):
+    created = {}
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            created.update(kwargs)
+            self.images = _Images()
+
+    class _FakeKeyring:
+        @staticmethod
+        def get_password(service_name, username):
+            if service_name == "gpt-image-batch" and username == "OPENAI_API_KEY":
+                return "test-key-from-keyring"
+            return None
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(AsyncOpenAI=_FakeAsyncOpenAI))
+    monkeypatch.setitem(sys.modules, "keyring", _FakeKeyring)
+    config = AppConfig(
+        api={"api_key_source": "windows_credential_manager"},
+        prompt={"template": "prompt"},
+    )
+
+    OpenAIImageClient(config).sdk_client
+
+    assert created["api_key"] == "test-key-from-keyring"

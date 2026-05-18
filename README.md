@@ -57,7 +57,7 @@ python -m app run --config examples/example.config.json --output-dir .\out
 Real API smoke tests are guarded and only run when explicitly enabled:
 
 ```powershell
-$env:GPT_IMAGE_BATCH_REAL_API_SMOKE=1
+$env:GPT_IMAGE_BATCH_RUN_REAL_API_SMOKE=1
 pytest tests/test_real_api_smoke.py
 ```
 

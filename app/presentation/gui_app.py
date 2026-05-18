@@ -56,6 +56,7 @@ class GuiFormState:
     output_format: str = "png"
     background: str = "auto"
     moderation: Literal["auto", "low"] = "auto"
+    image_count: int = 1
     concurrency: int = 2
     api_key_source: str = "env"
     api_key: str | None = None
@@ -74,6 +75,7 @@ class GuiFormState:
                 "output_format": self.output_format,
                 "background": self.background,
                 "moderation": self.moderation,
+                "n": self.image_count,
             },
             execution={"concurrency": self.concurrency},
             output={"output_dir": self.output_dir},
@@ -257,6 +259,9 @@ class MainWindow:
                 self.format_combo = _combo(QtWidgets, ["png", "jpeg", "webp"], "png")
                 self.background_combo = _combo(QtWidgets, ["auto", "opaque"], "auto")
                 self.moderation_combo = _combo(QtWidgets, ["auto", "low"], "auto")
+                self.image_count_spin = QtWidgets.QSpinBox()
+                self.image_count_spin.setRange(1, 10)
+                self.image_count_spin.setValue(1)
                 self.concurrency_spin = QtWidgets.QSpinBox()
                 self.concurrency_spin.setRange(1, 8)
                 self.concurrency_spin.setValue(2)
@@ -270,6 +275,7 @@ class MainWindow:
                 form.addRow("Output format", self.format_combo)
                 form.addRow("Background", self.background_combo)
                 form.addRow("Moderation", self.moderation_combo)
+                form.addRow("Images per input", self.image_count_spin)
                 form.addRow("Concurrency", self.concurrency_spin)
                 root.addLayout(form)
 
@@ -328,6 +334,7 @@ class MainWindow:
                     output_format=self.format_combo.currentText(),
                     background=self.background_combo.currentText(),
                     moderation=self.moderation_combo.currentText(),
+                    image_count=self.image_count_spin.value(),
                     concurrency=self.concurrency_spin.value(),
                 )
 

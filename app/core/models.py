@@ -41,6 +41,7 @@ class TaskPlan(CoreModel):
     source_paths: list[Path] = Field(default_factory=list)
     mask_path: Optional[Path] = None
     rendered_prompt: str
+    variant: int = 1
     output_plan: Optional[OutputPlan] = None
     input_image: Optional[InputImage] = None
     status: str = "queued"

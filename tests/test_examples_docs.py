@@ -27,7 +27,7 @@ def test_examples_readme_and_root_docs_cover_required_user_flows():
         "python -m app gui",
         "GPT_IMAGE_BATCH_MOCK_API=1",
         "--dry-run",
-        "GPT_IMAGE_BATCH_REAL_API_SMOKE=1",
+        "GPT_IMAGE_BATCH_RUN_REAL_API_SMOKE=1",
         "profile",
         "PySide6",
         "PyInstaller",

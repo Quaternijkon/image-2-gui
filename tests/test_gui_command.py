@@ -62,6 +62,7 @@ def test_gui_form_state_builds_config_and_command_without_secret_material(tmp_pa
         output_format="webp",
         background="opaque",
         moderation="low",
+        image_count=3,
         concurrency=3,
         api_key_source="env:OPENAI_API_KEY",
         api_key="sk-secret-never-write",
@@ -72,6 +73,7 @@ def test_gui_form_state_builds_config_and_command_without_secret_material(tmp_pa
     assert config.output.output_dir == output_dir
     assert config.prompt.template == "Retouch the product photo"
     assert config.image.output_format == "webp"
+    assert config.image.n == 3
     assert config.execution.concurrency == 3
 
     layout = state.prepare_job_files(dry_run=True)
@@ -79,6 +81,7 @@ def test_gui_form_state_builds_config_and_command_without_secret_material(tmp_pa
     snapshot = json.loads(layout.config_snapshot_path.read_text(encoding="utf-8"))
     command = layout.command_path.read_text(encoding="utf-8")
     assert snapshot["prompt"]["template"] == "Retouch the product photo"
+    assert snapshot["image"]["n"] == 3
     assert "api_key" not in snapshot["api"]
     assert "sk-secret-never-write" not in layout.config_snapshot_path.read_text(encoding="utf-8")
     assert "sk-secret-never-write" not in command

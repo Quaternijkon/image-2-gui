@@ -56,6 +56,31 @@ def test_task_planner_builds_generate_tasks_without_input_dir(tmp_path):
     ]
 
 
+def test_task_planner_expands_image_tasks_for_each_requested_variant(tmp_path, make_image):
+    image = make_image(tmp_path / "input" / "a.png")
+    config = AppConfig(
+        input={"mode": "edit", "input_dir": tmp_path / "input"},
+        image={"n": 3},
+        prompt={"template": "Edit {stem} {variant} {index}"},
+        output={"output_dir": tmp_path / "out", "job_subdir_enabled": False},
+    )
+
+    planned = TaskPlanner(config).build()
+
+    assert [task.task_id for task in planned.tasks] == ["000001", "000002", "000003"]
+    assert [task.source_paths for task in planned.tasks] == [[image], [image], [image]]
+    assert [task.rendered_prompt for task in planned.tasks] == [
+        "Edit a v1 000001",
+        "Edit a v2 000002",
+        "Edit a v3 000003",
+    ]
+    assert [task.output_plan.final_path.name for task in planned.tasks] == [
+        "a_gpt_v1.png",
+        "a_gpt_v2.png",
+        "a_gpt_v3.png",
+    ]
+
+
 def test_task_planner_keeps_invalid_image_as_validation_failed_task(tmp_path, make_image):
     make_image(tmp_path / "input" / "good.png")
     bad = tmp_path / "input" / "bad.png"

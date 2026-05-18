@@ -15,7 +15,10 @@ def test_python_module_exposes_run_subcommand_help():
     assert "--output-dir" in result.stdout
 
 
-def test_python_module_accepts_run_subcommand_stub_arguments():
+def test_python_module_accepts_run_subcommand_dry_run_arguments(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"prompt":{"template":"Generate"},"input":{"mode":"generate"}}', encoding="utf-8")
+
     result = subprocess.run(
         [
             sys.executable,
@@ -23,9 +26,10 @@ def test_python_module_accepts_run_subcommand_stub_arguments():
             "app",
             "run",
             "--config",
-            "D:/job.config.json",
+            str(config_path),
             "--output-dir",
-            "D:/out",
+            str(tmp_path / "out"),
+            "--dry-run",
             "--events-jsonl",
         ],
         check=False,
@@ -34,4 +38,4 @@ def test_python_module_accepts_run_subcommand_stub_arguments():
     )
 
     assert result.returncode == 0
-    assert "not implemented" in result.stdout
+    assert "dry_run_summary" in result.stdout

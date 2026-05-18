@@ -27,10 +27,15 @@ def test_event_protocol_serializes_and_parses_stable_jsonl_event():
 def test_event_protocol_accepts_known_event_names(event_name):
     kwargs = {
         "job_started": {"job_id": "job-1", "total_tasks": 1},
-        "partial_saved": {"job_id": "job-1", "task_id": "000001", "partial_file": "partials/a.png"},
+        "partial_saved": {"task_id": "000001", "partial_index": 1, "path": "partials/a.png"},
         "task_succeeded": {"job_id": "job-1", "task_id": "000001", "output_files": ["final/a.png"]},
-        "task_failed": {"job_id": "job-1", "task_id": "000001", "error": "failed"},
-        "job_completed": {"job_id": "job-1", "summary": {"succeeded": 1}},
+        "task_failed": {
+            "task_id": "000001",
+            "error_code": "invalid_image",
+            "message": "failed",
+            "attempt": 1,
+        },
+        "job_completed": {"succeeded": 1, "failed": 0, "skipped": 0},
     }[event_name]
     event = EventProtocol.parse_line(EventProtocol.serialize(event_name, **kwargs))
 
@@ -62,9 +67,43 @@ def test_event_protocol_redacts_secret_looking_strings_in_nested_values():
         "task_failed",
         job_id="job-1",
         task_id="000001",
-        error={"message": "bad sk-secret-value", "items": ["sk-nested"]},
+        error_code="bad_secret",
+        message={"message": "bad sk-secret-value", "items": ["sk-nested"]},
+        attempt=1,
     )
 
     assert "sk-secret-value" not in line
     assert "sk-nested" not in line
     assert "[REDACTED]" in line
+
+
+def test_event_protocol_parses_section_9_4_example_shapes_without_job_id():
+    partial = EventProtocol.parse_line(
+        '{"timestamp":"2026-05-19T00:00:00Z","event":"partial_saved",'
+        '"task_id":"000001","partial_index":2,"path":"partials/000001-2.png"}'
+    )
+    failed = EventProtocol.parse_line(
+        '{"timestamp":"2026-05-19T00:00:00Z","event":"task_failed",'
+        '"task_id":"000001","error_code":"invalid_mask","message":"Bad mask","attempt":2}'
+    )
+    completed = EventProtocol.parse_line(
+        '{"timestamp":"2026-05-19T00:00:00Z","event":"job_completed",'
+        '"succeeded":3,"failed":1,"skipped":2}'
+    )
+
+    assert partial["path"] == "partials/000001-2.png"
+    assert failed["error_code"] == "invalid_mask"
+    assert completed["succeeded"] == 3
+
+
+def test_event_protocol_redacts_sk_token_even_after_alphanumeric_prefix():
+    line = EventProtocol.serialize(
+        "task_failed",
+        task_id="000001",
+        error_code="auth",
+        message="prefixAsk-secret-token but task-000001 stays",
+        attempt=1,
+    )
+
+    assert "sk-secret-token" not in line
+    assert "task-000001" in line

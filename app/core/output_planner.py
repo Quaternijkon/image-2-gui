@@ -55,18 +55,21 @@ class OutputPlanner:
             command_path=root / "command.ps1",
         )
 
-        for directory in [
+        directories = [
             layout.root,
             layout.final_dir,
             layout.partials_dir,
-            layout.logs_dir,
             layout.failed_dir,
             layout.thumbnails_dir,
-        ]:
+        ]
+        if self.config.output.save_logs:
+            directories.append(layout.logs_dir)
+        for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
-        layout.app_log_path.touch(exist_ok=True)
-        layout.events_jsonl_path.touch(exist_ok=True)
-        layout.errors_jsonl_path.touch(exist_ok=True)
+        if self.config.output.save_logs:
+            layout.app_log_path.touch(exist_ok=True)
+            layout.events_jsonl_path.touch(exist_ok=True)
+            layout.errors_jsonl_path.touch(exist_ok=True)
 
         if self.config.output.save_config_snapshot:
             _write_json(layout.config_snapshot_path, _sanitized_config(self.config))
@@ -85,7 +88,14 @@ class OutputPlanner:
         )
         return layout
 
-    def plan_variant_output(self, job: JobLayout, task: TaskPlan, *, variant: int) -> OutputPlan:
+    def plan_variant_output(
+        self,
+        job: JobLayout,
+        task: TaskPlan,
+        *,
+        variant: int,
+        reserved_paths: set[Path] | None = None,
+    ) -> OutputPlan:
         stem = _task_stem(task)
         extension = self.config.image.output_format.lower().lstrip(".")
         context = {
@@ -114,11 +124,14 @@ class OutputPlanner:
         policy = self.config.execution.overwrite_policy
         should_skip = False
 
-        if final_path.exists():
+        reserved_paths = reserved_paths or set()
+        if final_path in reserved_paths:
+            final_path = _append_counter(final_path, reserved_paths=reserved_paths)
+        elif final_path.exists():
             if policy == "skip_existing":
                 should_skip = True
             elif policy == "append_counter":
-                final_path = _append_counter(final_path)
+                final_path = _append_counter(final_path, reserved_paths=reserved_paths)
 
         return OutputPlan(
             final_path=final_path,
@@ -173,11 +186,12 @@ def _task_hash(task: TaskPlan) -> str:
     return digest.hexdigest()[:8]
 
 
-def _append_counter(path: Path) -> Path:
+def _append_counter(path: Path, *, reserved_paths: set[Path] | None = None) -> Path:
+    reserved_paths = reserved_paths or set()
     counter = 2
     while True:
         candidate = path.with_name(f"{path.stem}_{counter}{path.suffix}")
-        if not candidate.exists():
+        if not candidate.exists() and candidate not in reserved_paths:
             return candidate
         counter += 1
 
@@ -191,7 +205,8 @@ def _validate_filename(filename: str) -> None:
         raise OutputPlanningError("unsafe output filename: path components are not allowed")
     if any(char in WINDOWS_INVALID_FILENAME_CHARS for char in filename):
         raise OutputPlanningError("unsafe output filename: invalid character")
-    if not stem or stem.upper() in WINDOWS_RESERVED_NAMES:
+    first_name_segment = path.name.split(".", 1)[0].upper()
+    if not stem or first_name_segment in WINDOWS_RESERVED_NAMES:
         raise OutputPlanningError("unsafe output filename: reserved or empty name")
 
 

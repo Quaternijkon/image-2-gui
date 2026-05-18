@@ -41,7 +41,16 @@ class ManifestStore:
                     {
                         "line_number": line_number,
                         "message": str(exc),
-                        "line": line,
+                        "line": sanitize_record(line),
+                    }
+                )
+                continue
+            if not isinstance(record, dict):
+                self._load_issues.append(
+                    {
+                        "line_number": line_number,
+                        "message": "manifest line must be a JSON object",
+                        "line": sanitize_record(line),
                     }
                 )
                 continue
@@ -110,7 +119,7 @@ def sanitize_record(value: Any) -> Any:
 
 
 def _redact_secret_strings(value: str) -> str:
-    return re.sub(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]+", "[REDACTED]", value)
+    return re.sub(r"(?<!ta)sk-[A-Za-z0-9_\-]+", "[REDACTED]", value)
 
 
 __all__ = ["ManifestStore", "sanitize_record"]

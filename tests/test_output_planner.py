@@ -115,6 +115,8 @@ def test_output_planner_skip_existing_marks_existing_output(tmp_path, make_image
         "nested\\name.png",
         "bad:name.png",
         "CON.png",
+        "CON.txt.png",
+        "LPT1.foo.png",
         ".png",
         "",
     ],
@@ -157,3 +159,17 @@ def test_output_planner_new_job_dir_policy_forces_unique_job_dir_in_root_mode(tm
     assert job.root.parent == tmp_path
     assert job.root.name.startswith("job-")
     assert job.final_dir == job.root / "final"
+
+
+def test_output_planner_honors_save_logs_false(tmp_path):
+    config = AppConfig(
+        prompt={"template": "Create"},
+        output={"output_dir": tmp_path, "job_subdir_enabled": False, "save_logs": False},
+    )
+
+    job = OutputPlanner(config).create_job_layout()
+
+    assert job.app_log_path == tmp_path / "logs" / "app.log"
+    assert job.events_jsonl_path == tmp_path / "logs" / "events.jsonl"
+    assert job.errors_jsonl_path == tmp_path / "logs" / "errors.jsonl"
+    assert not job.logs_dir.exists()

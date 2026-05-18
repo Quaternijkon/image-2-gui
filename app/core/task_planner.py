@@ -11,16 +11,19 @@ class TaskPlanner:
 
     def build(self) -> PlannedJob:
         output_planner = OutputPlanner(self.config)
-        job = output_planner.create_job_layout()
         if self.config.input.mode == "generate":
-            tasks = self._build_generate_tasks(output_planner, job)
+            tasks = self._build_generate_tasks_without_outputs()
+            job = output_planner.create_job_layout()
+            self._assign_outputs(tasks, output_planner, job)
             return PlannedJob(job=job, tasks=tasks, issues=[])
 
         scan = scan_input_images(self.config.input)
-        tasks = self._build_image_tasks(scan.images, output_planner, job)
+        tasks = self._build_image_tasks_without_outputs(scan.images)
+        job = output_planner.create_job_layout()
+        self._assign_outputs(tasks, output_planner, job)
         return PlannedJob(job=job, tasks=tasks, issues=scan.issues)
 
-    def _build_generate_tasks(self, output_planner: OutputPlanner, job: JobLayout) -> list[TaskPlan]:
+    def _build_generate_tasks_without_outputs(self) -> list[TaskPlan]:
         tasks: list[TaskPlan] = []
         for index in range(1, self.config.image.n + 1):
             task_id = f"{index:06d}"
@@ -37,13 +40,10 @@ class TaskPlanner:
                 rendered_prompt=prompt,
                 output_plan=None,
             )
-            task.output_plan = output_planner.plan_variant_output(job, task, variant=index)
             tasks.append(task)
         return tasks
 
-    def _build_image_tasks(
-        self, images: list[InputImage], output_planner: OutputPlanner, job: JobLayout
-    ) -> list[TaskPlan]:
+    def _build_image_tasks_without_outputs(self, images: list[InputImage]) -> list[TaskPlan]:
         tasks: list[TaskPlan] = []
         for index, image in enumerate(images, start=1):
             task_id = f"{index:06d}"
@@ -64,9 +64,22 @@ class TaskPlanner:
                 if image.validation_status == "validation_failed"
                 else "queued",
             )
-            task.output_plan = output_planner.plan_variant_output(job, task, variant=1)
             tasks.append(task)
         return tasks
+
+    def _assign_outputs(
+        self, tasks: list[TaskPlan], output_planner: OutputPlanner, job: JobLayout
+    ) -> None:
+        reserved_paths: set = set()
+        for index, task in enumerate(tasks, start=1):
+            variant = index if task.mode == "generate" else 1
+            task.output_plan = output_planner.plan_variant_output(
+                job,
+                task,
+                variant=variant,
+                reserved_paths=reserved_paths,
+            )
+            reserved_paths.add(task.output_plan.final_path)
 
     def _render_prompt(self, *, stem: str, index: str, variant: str) -> str:
         renderer = PromptRenderer(

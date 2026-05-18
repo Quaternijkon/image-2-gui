@@ -71,7 +71,7 @@ def test_manifest_store_rejects_task_records_without_required_shape(tmp_path):
 def test_manifest_store_skips_malformed_jsonl_and_exposes_diagnostics(tmp_path):
     path = tmp_path / "manifest.jsonl"
     path.write_text(
-        '{"task_id": "task-1", "status": "running"}\n{"task_id": \n{"task_id": "task-1", "status": "succeeded"}\n',
+        '{"task_id": "task-1", "status": "running"}\n{"task_id": "sk-secret-token\n{"task_id": "task-1", "status": "succeeded"}\n',
         encoding="utf-8",
     )
     store = ManifestStore(path)
@@ -81,3 +81,19 @@ def test_manifest_store_skips_malformed_jsonl_and_exposes_diagnostics(tmp_path):
     assert latest["task-1"]["status"] == "succeeded"
     assert len(store.load_issues()) == 1
     assert store.load_issues()[0]["line_number"] == 2
+    assert "sk-secret-token" not in json.dumps(store.load_issues())
+
+
+def test_manifest_store_skips_non_object_jsonl_records(tmp_path):
+    path = tmp_path / "manifest.jsonl"
+    path.write_text(
+        '[]\nnull\n"sk-secret-token"\n{"task_id":"task-1","status":"succeeded"}\n',
+        encoding="utf-8",
+    )
+    store = ManifestStore(path)
+
+    latest = store.load_latest_by_task()
+
+    assert latest["task-1"]["status"] == "succeeded"
+    assert len(store.load_issues()) == 3
+    assert "sk-secret-token" not in json.dumps(store.load_issues())

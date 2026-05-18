@@ -17,10 +17,10 @@ ALLOWED_EVENTS = {
 REQUIRED_FIELDS = {
     "job_started": {"job_id", "total_tasks"},
     "task_started": {"job_id", "task_id"},
-    "partial_saved": {"job_id", "task_id", "partial_file"},
+    "partial_saved": {"task_id", "partial_index", "path"},
     "task_succeeded": {"job_id", "task_id", "output_files"},
-    "task_failed": {"job_id", "task_id", "error"},
-    "job_completed": {"job_id", "summary"},
+    "task_failed": {"task_id", "error_code", "message", "attempt"},
+    "job_completed": {"succeeded", "failed", "skipped"},
 }
 
 

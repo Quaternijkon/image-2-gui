@@ -59,7 +59,8 @@ def test_scan_input_images_recurses_and_reports_invalid_images(tmp_path, make_im
 
     result = scan_input_images(InputConfig(input_dir=tmp_path, recursive=True))
 
-    assert [image.path.name for image in result.images] == ["good.webp"]
+    assert [image.path.name for image in result.images] == ["broken.png", "good.webp"]
+    assert result.images[0].validation_status == "validation_failed"
     assert len(result.issues) == 1
     assert result.issues[0].code == "invalid_image"
     assert result.issues[0].path == bad

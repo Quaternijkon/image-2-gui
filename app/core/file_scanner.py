@@ -31,11 +31,20 @@ def scan_input_images(config: InputConfig) -> ScanResult:
         try:
             width, height, image_format = read_image_metadata(path)
         except (OSError, UnidentifiedImageError) as exc:
-            issues.append(
-                PreflightIssue(
-                    code="invalid_image",
-                    message=f"image could not be read: {exc}",
+            issue = PreflightIssue(
+                code="invalid_image",
+                message=f"image could not be read: {exc}",
+                path=path,
+            )
+            issues.append(issue)
+            images.append(
+                InputImage(
                     path=path,
+                    width=0,
+                    height=0,
+                    format="UNKNOWN",
+                    validation_status="validation_failed",
+                    issues=[issue],
                 )
             )
             continue

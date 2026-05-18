@@ -112,6 +112,23 @@ def test_output_writer_temporary_busy_error_is_retryable(tmp_path, monkeypatch):
     assert exc_info.value.retryable is True
 
 
+def test_output_writer_windows_sharing_violation_is_retryable(tmp_path, monkeypatch):
+    task = _task(tmp_path)
+
+    def raise_sharing_violation(self, *args, **kwargs):
+        error = PermissionError(errno.EACCES, "file in use", str(self))
+        error.winerror = 32
+        raise error
+
+    monkeypatch.setattr(Path, "open", raise_sharing_violation)
+
+    with pytest.raises(ImageBatchError) as exc_info:
+        OutputWriter(output_root=tmp_path).write_final(task, PNG_B64)
+
+    assert exc_info.value.code == "write_error"
+    assert exc_info.value.retryable is True
+
+
 def test_output_writer_uses_unique_temp_names(tmp_path, monkeypatch):
     task = _task(tmp_path)
     opened_paths = []

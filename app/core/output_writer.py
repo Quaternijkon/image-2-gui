@@ -18,6 +18,11 @@ TEMPORARY_WRITE_ERRNOS = {
     errno.EMFILE,
 }
 
+TEMPORARY_WRITE_WINERRORS = {
+    32,  # ERROR_SHARING_VIOLATION: another process has the file open.
+    33,  # ERROR_LOCK_VIOLATION: a byte range is locked.
+}
+
 
 class OutputWriter:
     def __init__(self, *, output_root: Path | None = None) -> None:
@@ -87,6 +92,8 @@ class OutputWriter:
 
 
 def _is_temporary_write_error(exc: OSError) -> bool:
+    if getattr(exc, "winerror", None) in TEMPORARY_WRITE_WINERRORS:
+        return True
     return exc.errno in TEMPORARY_WRITE_ERRNOS
 
 

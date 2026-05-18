@@ -79,21 +79,20 @@ def test_event_protocol_redacts_secret_looking_strings_in_nested_values():
 
 def test_event_protocol_parses_section_9_4_example_shapes_without_job_id():
     partial = EventProtocol.parse_line(
-        '{"timestamp":"2026-05-19T00:00:00Z","event":"partial_saved",'
-        '"task_id":"000001","partial_index":2,"path":"partials/000001-2.png"}'
+        '{"event":"partial_saved","task_id":"000001",'
+        '"partial_index":0,"path":"D:/output/partials/a/partial_0.png"}'
     )
     failed = EventProtocol.parse_line(
-        '{"timestamp":"2026-05-19T00:00:00Z","event":"task_failed",'
-        '"task_id":"000001","error_code":"invalid_mask","message":"Bad mask","attempt":2}'
+        '{"event":"task_failed","task_id":"000002",'
+        '"error_code":"rate_limit","message":"retry scheduled","attempt":1}'
     )
     completed = EventProtocol.parse_line(
-        '{"timestamp":"2026-05-19T00:00:00Z","event":"job_completed",'
-        '"succeeded":3,"failed":1,"skipped":2}'
+        '{"event":"job_completed","succeeded":50,"failed":2,"skipped":0}'
     )
 
-    assert partial["path"] == "partials/000001-2.png"
-    assert failed["error_code"] == "invalid_mask"
-    assert completed["succeeded"] == 3
+    assert partial["path"] == "D:/output/partials/a/partial_0.png"
+    assert failed["error_code"] == "rate_limit"
+    assert completed["succeeded"] == 50
 
 
 def test_event_protocol_redacts_sk_token_even_after_alphanumeric_prefix():

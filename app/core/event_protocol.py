@@ -64,8 +64,6 @@ class EventProtocol:
         if "event" not in record:
             raise EventProtocolError("missing event field")
         _validate_event_name(str(record["event"]))
-        if "timestamp" not in record:
-            raise EventProtocolError("missing timestamp field")
         _validate_required_fields(str(record["event"]), record)
         return sanitize_record(record)
 

@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -14,6 +15,34 @@ from app.core.output_planner import OutputPlanner
 
 
 Mode = Literal["generate", "edit", "inpaint", "mask"]
+
+
+@dataclass(frozen=True)
+class GuiCommandPreview:
+    root: Path
+    config_snapshot_path: Path
+    command_path: Path
+    control_path: Path
+    command: str
+
+
+@dataclass(frozen=True)
+class GuiPreparedJob:
+    root: Path
+    final_dir: Path
+    partials_dir: Path
+    logs_dir: Path
+    app_log_path: Path
+    events_jsonl_path: Path
+    errors_jsonl_path: Path
+    failed_dir: Path
+    thumbnails_dir: Path
+    manifest_path: Path
+    summary_path: Path
+    config_snapshot_path: Path
+    command_path: Path
+    control_path: Path
+    command: str
 
 
 @dataclass
@@ -51,19 +80,80 @@ class GuiFormState:
         )
 
     def prepare_job_files(self, *, dry_run: bool = False):
-        config = self.build_config()
+        config = self._build_exact_root_config(_unique_job_root(self._output_root()))
         layout = OutputPlanner(config).create_job_layout()
-        command = CommandBuilder(config).build_powershell_command(
+        command = self._build_command(
+            config=config,
             config_path=layout.config_snapshot_path,
-            input_dir=config.input.input_dir,
             output_dir=layout.root,
+            dry_run=dry_run,
+        )
+        layout.command_path.write_text(command + "\n", encoding="utf-8")
+        return GuiPreparedJob(
+            root=layout.root,
+            final_dir=layout.final_dir,
+            partials_dir=layout.partials_dir,
+            logs_dir=layout.logs_dir,
+            app_log_path=layout.app_log_path,
+            events_jsonl_path=layout.events_jsonl_path,
+            errors_jsonl_path=layout.errors_jsonl_path,
+            failed_dir=layout.failed_dir,
+            thumbnails_dir=layout.thumbnails_dir,
+            manifest_path=layout.manifest_path,
+            summary_path=layout.summary_path,
+            config_snapshot_path=layout.config_snapshot_path,
+            command_path=layout.command_path,
+            control_path=layout.root / "job.control.json",
+            command=command,
+        )
+
+    def build_command_preview(self, *, dry_run: bool = True) -> GuiCommandPreview:
+        root = _unique_job_root(self._output_root())
+        config = self._build_exact_root_config(root)
+        config_path = root / "config.snapshot.json"
+        command_path = root / "command.ps1"
+        command = self._build_command(
+            config=config,
+            config_path=config_path,
+            output_dir=root,
+            dry_run=dry_run,
+        )
+        return GuiCommandPreview(
+            root=root,
+            config_snapshot_path=config_path,
+            command_path=command_path,
+            control_path=root / "job.control.json",
+            command=command,
+        )
+
+    def _output_root(self) -> Path:
+        return self.output_dir or Path.cwd() / "output"
+
+    def _build_exact_root_config(self, root: Path) -> AppConfig:
+        payload = self.build_config().model_dump(mode="json", exclude_none=True)
+        payload.setdefault("output", {})
+        payload["output"]["output_dir"] = str(root)
+        payload["output"]["job_subdir_enabled"] = False
+        return AppConfig.model_validate(payload)
+
+    def _build_command(
+        self,
+        *,
+        config: AppConfig,
+        config_path: Path,
+        output_dir: Path,
+        dry_run: bool,
+    ) -> str:
+        command = CommandBuilder(config).build_powershell_command(
+            config_path=config_path,
+            input_dir=config.input.input_dir,
+            output_dir=output_dir,
             concurrency=config.execution.concurrency,
             events_jsonl=True,
         )
         if dry_run:
-            command = command.rstrip() + " `\n  --dry-run"
-        layout.command_path.write_text(command + "\n", encoding="utf-8")
-        return layout
+            return command.rstrip() + " `\n  --dry-run"
+        return command
 
 
 @dataclass
@@ -243,14 +333,13 @@ class MainWindow:
 
             def refresh_command_preview(self) -> None:
                 try:
-                    layout = self.form_state().prepare_job_files(dry_run=True)
+                    preview = self.form_state().build_command_preview(dry_run=True)
                 except Exception as exc:
                     self.command_preview.setPlainText(f"Error: {exc}")
                     self.status_label.setText(str(exc))
                     return
-                self.current_layout = layout
-                self.command_preview.setPlainText(layout.command_path.read_text(encoding="utf-8"))
-                self.status_label.setText(f"Command saved: {layout.command_path}")
+                self.command_preview.setPlainText(preview.command)
+                self.status_label.setText(f"Preview: {preview.command_path}")
 
             def copy_command(self) -> None:
                 QtGui.QGuiApplication.clipboard().setText(self.command_preview.toPlainText())
@@ -262,6 +351,7 @@ class MainWindow:
                     self.status_label.setText(str(exc))
                     return
 
+                self.command_preview.setPlainText(self.current_layout.command)
                 self.event_state = RunnerEventState()
                 self.queue_table.setRowCount(0)
                 self.log_widget.clear()
@@ -364,10 +454,27 @@ def _optional_path(text: str) -> Path | None:
     return Path(stripped) if stripped else None
 
 
+def _unique_job_root(output_root: Path) -> Path:
+    base = datetime.now().strftime("job-%Y%m%d-%H%M%S")
+    candidate = output_root / base
+    counter = 1
+    while candidate.exists():
+        candidate = output_root / f"{base}-{counter:03d}"
+        counter += 1
+    return candidate
+
+
 def _redact(text: str) -> str:
     if "sk-" not in text:
         return text
     return text.split("sk-", 1)[0] + "sk-[REDACTED]"
 
 
-__all__ = ["GuiFormState", "MainWindow", "RunnerEventState", "launch_gui"]
+__all__ = [
+    "GuiCommandPreview",
+    "GuiFormState",
+    "GuiPreparedJob",
+    "MainWindow",
+    "RunnerEventState",
+    "launch_gui",
+]

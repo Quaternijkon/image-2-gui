@@ -11,3 +11,4 @@ dist/
 .env
 *.log
 *.jsonl
+temp/
